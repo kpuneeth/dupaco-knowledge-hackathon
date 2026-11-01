@@ -1,0 +1,16 @@
+results/
+__pycache__/
+*.pyc
+.DS_Store
+.env
+snapshots/0*/
+
+# local working files, not part of the submission
+HANDOFF.md
+Knowledge-Hackathon-Assignment.pdf
+dev_tools/last_report.json
+
+# supplied website data must not be published
+snapshots_zip/
+snapshots/
+starter/

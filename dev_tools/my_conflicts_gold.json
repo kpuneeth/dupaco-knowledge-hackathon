@@ -1,0 +1,14 @@
+[
+ {"id":"g1","topic_keywords":["auto","60-month"],"values":["5.34%","5.39%"],"correct_value":"5.39%"},
+ {"id":"g2","topic_keywords":["auto","84-month"],"values":["5.54%","5.59%"],"correct_value":"5.59%"},
+ {"id":"g3","topic_keywords":["30-year","mortgage"],"values":["6.037%","7.29%"],"correct_value":"7.29%"},
+ {"id":"g4","topic_keywords":["17-month","certificate"],"values":["3.85%","3.95%","4.10%"],"correct_value":"4.10%"},
+ {"id":"g5","topic_keywords":["10-month","jumbo"],"values":["3.90%","4.00%"],"correct_value":"4.00%"},
+ {"id":"g6","topic_keywords":["12-month","certificate"],"values":["2.90%","3.40%"],"correct_value":"3.40%"},
+ {"id":"g7","topic_keywords":["1st rate checking"],"values":["3.00%","2.50%"],"correct_value":"2.50%"},
+ {"id":"g8","topic_keywords":["money market"],"values":["3.66%","1.85%"],"correct_value":"1.85%"},
+ {"id":"g9","topic_keywords":["share savings"],"values":["0.20%","0.15%"],"correct_value":"0.15%"},
+ {"id":"g10","topic_keywords":["branch"],"values":["23","22"],"correct_value":"22"},
+ {"id":"g11","topic_keywords":["forbes"],"values":["fourth","fifth"],"correct_value":"fifth"},
+ {"id":"g12","topic_keywords":["refinance","15-year"],"values":["5.749%","6.88%"],"correct_value":"6.88%"}
+]
