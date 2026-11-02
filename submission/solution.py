@@ -37,17 +37,19 @@ STOPWORDS = {
     "annual", "earn", "pay", "pays", "charge", "between", "balance", "vehicle", "model", "term", "month", "year",
     "january", "february", "march", "april", "may", "june", "july", "august", "september", "october",
     "november", "december", "was", "then", "back", "ago", "last", "since", "when", "where", "why", "will",
-    "should", "still", "go", "going", "use", "using",
+    "should", "still", "go", "going", "use", "using", "been",
 }
 # Question words that mean the same thing as the website's own product vocabulary.
 # REPLACE_WORDS are swapped out entirely (the site never uses them in its rate tables).
-REPLACE_WORDS = {"mortgage", "mortgages", "cd", "cds", "car", "truck", "vehicle"}
+REPLACE_WORDS = {"mortgage", "mortgages", "cd", "cds", "car", "truck", "vehicle", "house"}
 SYNONYMS = {
     "mortgage": ["home", "loan"], "mortgages": ["home", "loan"], "cd": ["certificate"], "cds": ["certificate"],
     "car": ["auto"], "truck": ["auto"], "vehicle": ["auto"], "motorcycle": ["auto", "motorcycle"],
     "card": ["visa", "card"], "cards": ["visa", "card"], "rv": ["boat", "rv"], "boat": ["boat", "rv"],
-    "heloc": ["home", "equity", "line"], "refi": ["refinance"], "share": ["share"],
+    "heloc": ["home", "equity", "line"], "house": ["home", "loan"], "refi": ["refinance"], "share": ["share"],
 }
+# Words that only ever mean "a percentage" ("pay"/"earn" also mean other things).
+STRICT_RATE_WORDS = {"rate", "rates", "apy", "apr", "aprs", "dividend", "yield", "percent"}
 RATE_WORDS = {"rate", "rates", "apy", "apr", "aprs", "dividend", "interest", "yield", "earn", "pay", "pays", "percent"}
 SUPERLATIVE_MAX = {"highest", "best", "top", "max", "maximum", "most"}
 SUPERLATIVE_MIN = {"lowest", "cheapest", "minimum"}
@@ -92,7 +94,8 @@ def _authority(url: str) -> float:
         return 0.3
     if path.startswith(("/personal/", "/business/", "/savings-account/")):
         return 4.0
-    if path in ("", "/contact", "/about", "/about/join", "/membership", "/about/member-services"):
+    # /membership is a lead-capture form, not the membership info page (/about/join)
+    if path in ("", "/contact", "/about", "/about/join", "/about/member-services"):
         return 3.0
     if path.endswith("-lp") or path.startswith("/learn/"):
         return 1.0
@@ -560,10 +563,13 @@ def _parse_query(question: str) -> Query:
     # "Apple Pay" / "Google Pay" is a wallet, not "what does it pay"
     rate_words = set(TOKEN_PATTERN.findall(re.sub(r"\b(apple|google|samsung|android) pay\b", " ", q)))
     sup = "max" if words & SUPERLATIVE_MAX else ("min" if words & SUPERLATIVE_MIN else None)
-    is_list = bool(re.search(r"\b(all|list|every|each|what (?:kinds?|types?)|do you (?:have|offer))\b", q)
+    is_list = bool(re.search(r"\b(all|list|every|each|what (?:kinds?|types?)|(?:do|does) \w+ (?:have|offer))\b", q)
+                   or re.search(r"\bwhich\b.*\b(cards|certificates|cds|accounts|loans)\b", q)
                    or re.search(r"\b(cards|certificates|cds|accounts|loans)\b.*\brates\b|\brates\b.*\b(cards|certificates|cds)\b", q))
     return Query(text=q, words=words, terms=terms, term_months=_term_months(q), model_year=model_year,
-                 amount=amount, wants_rate=bool(rate_words & RATE_WORDS) or "%" in q, superlative=sup,
+                 amount=amount, wants_rate=bool(rate_words & RATE_WORDS) or "%" in q or (
+                     # "How much is a 7-year car loan on a 2024 vehicle?" names a rate-table row
+                     bool(_term_months(q) or model_year) and bool(re.search(r"\b(loan|certificate|cd)s?\b", q))), superlative=sup,
                  is_list=is_list)
 
 
@@ -735,13 +741,15 @@ def _answer_from_facts(snap: SnapshotIndex, query: Query) -> Optional[Answer]:
 # Text questions
 # ---------------------------------------------------------------------------------------------
 
-LINK_WORDS = {"link", "url", "website", "webpage", "locator"}
+LINK_WORDS = {"link", "url", "website", "webpage", "locator", "page", "site"}
+LINK_PHRASE = re.compile(r"\bwhere (?:can|do|should) i (?:find|see|check|look)\b.*\bonline\b")
 # Words that describe hours/branches in general rather than naming a specific branch.
 GENERIC_BRANCH_WORDS = {"lobby", "hour", "drive", "up", "thru", "through", "branch", "open", "close", "closed",
                         "time", "general", "same", "keep", "all", "every", "differ", "different", "weekend",
                         "weekday", "saturday", "sunday", "monday", "tuesday", "wednesday", "thursday",
                         "friday", "location", "office", "usual", "normal", "typical", "regular", "address",
-                        "where", "located", "find", "locate", "street", "avenue", "ave", "road", "st", "rd"}
+                        "where", "located", "find", "locate", "street", "avenue", "ave", "road", "st", "rd",
+                        "window", "teller", "get", "direction", "town"}
 
 
 def _name_terms(question: str) -> Set[str]:
@@ -750,8 +758,11 @@ def _name_terms(question: str) -> Set[str]:
 
 def _answer_hours(snap: SnapshotIndex, question: str) -> Optional[Answer]:
     q = question.lower()
-    if not re.search(r"\bhours?\b|what time|\b(?:mon|tues|wednes|thurs|fri|satur|sun)days?\b|\bweekends?\b", q) \
-            or not snap.hours:
+    # "When do lobbies close?" is about hours, but "When does the Hy-Vee branch close?" is about a
+    # closure date, so "when ... close" only counts when no branch is named.
+    asks_close = bool(re.search(r"\bwhen\b.*\bclose\b", q)) and not _name_terms(question)
+    if not (re.search(r"\bhours?\b|what time|\b(?:mon|tues|wednes|thurs|fri|satur|sun)days?\b|\bweekends?\b"
+                      r"|\bwhen\b.*\bopen\b", q) or asks_close) or not snap.hours:
         return None
     kind = "drive-up" if re.search(r"drive|thru", q) else "lobby"
     blocks = [h for h in snap.hours if h.kind == kind]
@@ -845,14 +856,19 @@ def _is_price_question(question: str) -> bool:
     return bool(set(TOKEN_PATTERN.findall(q)) & PRICE_WORDS) or bool(re.search(r"\bhow much (?:is|are|does|do)\b", q))
 
 
+COUNT_Q = re.compile(r"\b(?:how many|number of|count of)\s+(?:dupaco(?:'?s)?\s+)?([a-z]+)")
+# Words that don't narrow a count: "how many branch offices are there" is still the branch count.
+COUNT_GENERIC = {"number", "office", "location", "total", "operate", "exist", "currently", "open"}
+
+
 def _answer_count(snap: SnapshotIndex, question: str) -> Optional[Answer]:
     """'How many branches/employees/members?' Counts drift over time (23 branches -> 22 after a
     closure) and old pages keep the old number, so take the majority of the 5 newest statements."""
-    m = re.search(r"\bhow many ([a-z]+)", question.lower())
+    m = COUNT_Q.search(question.lower())
     if not m:
         return None
     noun = _stem(m.group(1))
-    if set(_query_terms(question)) - {noun}:
+    if set(_query_terms(question)) - {noun} - COUNT_GENERIC:
         return None                     # extra qualifiers ("employees used VTO") -> passage search
     pat = re.compile(rf"\b(\d[\d,]*)\+?\s+(?:[\w’'-]+\s+){{0,2}}{re.escape(noun[:5])}\w*", re.I)
     mentions = []
@@ -878,7 +894,8 @@ def _answer_count(snap: SnapshotIndex, question: str) -> Optional[Answer]:
 
 def _answer_branch_address(snap: SnapshotIndex, question: str) -> Optional[Answer]:
     q = question.lower()
-    if not re.search(r"\baddress\b|\bwhere is\b|\blocated\b|\blocation of\b", q):
+    if not re.search(r"\baddress\b|\bwhere is\b|\blocated\b|\blocation of\b|\bget to\b|\bdirections?\b"
+                     r"|\bbranch in\b", q):
         return None
     names = _name_terms(question)
     if not names:
@@ -892,7 +909,13 @@ TEXT_SYNONYMS = {
     "locator": ["location", "find"], "eligible": ["eligibility", "membership", "live", "work"],
     "join": ["membership", "member"], "wallet": ["wallet", "pay"], "vto": ["volunteer"],
     "closing": ["close"], "closed": ["close"], "open": ["open"],
+    "college": ["student"], "university": ["student"], "tuition": ["student"],
+    "requirement": ["eligible", "eligibility", "live", "work"], "qualify": ["eligible", "live", "work"],
+    "membership": ["join"], "closest": ["near", "mile"], "nearest": ["near", "mile"],
+    "change": ["update"], "moved": ["update", "address"],
 }
+# Phrases that ask the same thing as a single word the site uses.
+PHRASE_SYNONYMS = [(re.compile(r"\bwho can (?:join|become)\b"), ["eligible", "live", "work"])]
 BM25_K1, BM25_B = 1.2, 0.75
 TIME_RE = r"\b\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?|noon)"
 ANSWER_TYPES = [
@@ -900,7 +923,8 @@ ANSWER_TYPES = [
     (r"\bhours?\b|\bopen\b|\bclose[sd]?\b|what time", TIME_RE),
     (r"\baddress\b|\bwhere is\b|\blocated\b", r"\d+ [A-Z][a-z]+.*\b[A-Z]{2},? \d{5}"),
     (r"\bwhen\b|\bdate\b", r"\b(?:" + "|".join(MONTH_NUM) + r")\s+\d{1,2},\s+\d{4}"),
-    (r"\bphone\b|\bcall\b|\bcontact\b", r"\b\d{3}[-.]\d{3}[-.]\d{4}\b"),
+    (r"\bphone\b|\bcall\b|\bcontact\b|\b(?:update|change)\b.*\b(?:address|info|information|name|email)\b|\bmoved\b",
+     r"\b\d{3}[-.]\d{3}[-.]\d{4}\b"),
     (r"\brouting\b", r"\b\d{9}\b"),
 ]
 
@@ -914,6 +938,9 @@ def _query_terms(question: str) -> List[str]:
             t = _stem(t)
             if t not in STOPWORDS and not t.isdigit() and t not in terms:
                 terms.append(t)
+    for pat, extra in PHRASE_SYNONYMS:
+        if pat.search(question.lower()):
+            terms += [t for t in extra if t not in terms]
     return terms
 
 
@@ -949,7 +976,7 @@ def _search_passages(snap: SnapshotIndex, question: str, limit: int = 5) -> List
     # the question's word pairs as phrases ("student loan", "lobby hours").
     q = question.lower()
     want = [pat for trigger, pat in ANSWER_TYPES if re.search(trigger, q)]
-    m = re.search(r"\bhow many ([a-z]+)", q)
+    m = COUNT_Q.search(q)
     if m:   # "how many branches" -> a number right before "branch..."
         want.append(rf"\b\d[\d,]*\+?\s+(?:[\w-]+\s+){{0,2}}{re.escape(_stem(m.group(1))[:5])}")
     words = [w for w in TOKEN_PATTERN.findall(q.replace("'", "")) if w not in STOPWORDS]
@@ -957,7 +984,7 @@ def _search_passages(snap: SnapshotIndex, question: str, limit: int = 5) -> List
     q_terms = set(_query_terms(question))
     q_typed = set(_tokens(question)) - STOPWORDS      # without synonyms: "eligible" is not "membership"
     # Multi-word product names as typed ("Free Checking", "Bright Savings") should appear verbatim.
-    names = [n for n in re.findall(r"(?<!^)\b([A-Z][a-z]+(?: [A-Z][a-z]+)+)\b", question.strip())
+    names = [n for n in re.findall(r"(?<!^)\b([A-Z][a-z]+(?: [A-Z][a-z]+)*)\b", question.strip())
              if not set(n.lower().split()) <= STOPWORDS]
     reranked = []
     for sc, pid in ranked:
@@ -1252,6 +1279,9 @@ def _text_conflicts(snapshots: List[SnapshotIndex]) -> List[Conflict]:
     return out
 
 
+DOLLAR_NAME = re.compile(r"\b([A-Z][a-z]+)\$([a-z]{2,})\b")
+
+
 class TemporalKnowledgeSystem:
     """
     Temporal & Contradiction Resolution Engine compatible with contract.py.
@@ -1260,12 +1290,19 @@ class TemporalKnowledgeSystem:
     def __init__(self):
         # Snapshot indexes, kept sorted by taken_on (oldest first)
         self.snapshots: List[SnapshotIndex] = []
+        # Brand names spelled with "$" ("Home$tart"), keyed by how people type them
+        # ("homestart", "home start"), so the question uses the site's spelling.
+        self.dollar_names: Dict[str, str] = {}
 
     def ingest(self, snapshot: Snapshot) -> None:
         """
         Ingest a snapshot (called in chronological order: oldest to newest).
         """
         self.snapshots.append(_index_snapshot(snapshot))
+        for page in snapshot.pages:
+            for a, b in DOLLAR_NAME.findall(page.markdown):
+                self.dollar_names.setdefault(f"{a}s{b}".lower(), f"{a}${b}")
+                self.dollar_names.setdefault(f"{a} s{b}".lower(), f"{a}${b}")
         self.snapshots.sort(key=lambda s: s.taken_on)
 
     def _select_snapshot(self, as_of: Optional[str] = None) -> Optional[SnapshotIndex]:
@@ -1289,6 +1326,8 @@ class TemporalKnowledgeSystem:
         if snap is None:
             return Answer(text=REFUSAL_TEXT, confident=False)
 
+        for typed, name in self.dollar_names.items():
+            question = re.sub(rf"\b{re.escape(typed)}\b", name, question, flags=re.I)
         query = _parse_query(question)
         unknown = _unknown_names(snap, question)
         if unknown:
@@ -1299,7 +1338,7 @@ class TemporalKnowledgeSystem:
             ans = special(snap, question)
             if ans is not None:
                 return ans
-        if query.words & LINK_WORDS:
+        if query.words & LINK_WORDS or LINK_PHRASE.search(query.text):
             ans = _answer_link(snap, query)
             if ans is not None:
                 return ans
@@ -1315,6 +1354,10 @@ class TemporalKnowledgeSystem:
                 and not PRICE_TEXT.search(ans.text):
             # A fee/price question the fee schedule can't answer, and the best passage names no
             # price either: say so rather than return an unrelated paragraph.
+            return Answer(text=REFUSAL_TEXT, confident=False)
+        if ans.confident and query.words & STRICT_RATE_WORDS and not RATE_PATTERN.search(ans.text):
+            # Asked for a rate no table lists (e.g. a special that didn't exist yet on that date)
+            # and the best passage has no rate in it either.
             return Answer(text=REFUSAL_TEXT, confident=False)
         return ans
 

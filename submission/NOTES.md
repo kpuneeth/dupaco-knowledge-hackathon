@@ -56,6 +56,8 @@ When two pages give different values for the same product and tier, the more tru
 
    Among near-equal results, the newest dated page wins, or, for undated pages, the more trusted one. A blog post loses to a Dupaco product page that scores almost as well.
 
+**Reworded questions.** The hidden set is mostly rewordings, so intent detection is written for phrasings rather than for the public wording. For example, "When are you open?" is an hours question and "What is the number of branches?" is a count. A small synonym list maps everyday words to the site's vocabulary: house → home loan, college → student loan, "who can join" → eligibility. Brand names spelled with `$` ("Home$tart") are learned at ingest, so "Homestart" also works. These rules were checked against 126 reworded and "as of" questions in `dev_tools/probes4.tsv`; 120 pass.
+
 ## Saying "I don't know"
 
 The answer is `confident=False`, says the information isn't listed, and contains no numbers when:
@@ -63,6 +65,7 @@ The answer is `confident=False`, says the information isn't listed, and contains
 - the question names a product no rate table contains (ARM, construction, FHA or land loans)
 - a fee or price question finds no price anywhere relevant
 - a named branch has no hours on record
+- a rate question matches no table row and the best passage contains no rate. An example is a special that didn't exist yet on the `as_of` date.
 - nothing relevant is found at all
 
 ## Conflicts

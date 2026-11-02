@@ -31,5 +31,6 @@ python harness/run_eval.py --submission submission --eval eval/public_eval.jsonl
 
 - `show.py`: per-question results.
 - `probe.py`: asks your own question sets. The `probes*.tsv` files are the reworded and extra questions used as regression checks.
+- `probe_check.py`: scores `probes4.tsv`, which holds 126 reworded and "as of" questions with expected values (120 pass).
 - `conflicts.py`: prints the `conflicts()` output.
 - `dbg*.py`: debugging tools for fact matching, passage ranking and fees.
